@@ -16,7 +16,7 @@ Flutter Mobile App ← Firebase ← Spring Boot ← FPGA Status Heartbeat
 | Hardware | Verilog, DE10-Lite FPGA | 8-module FPGA design with 4-state FSM, UART, VGA |
 | Backend | Java 21, Spring Boot | REST API, UART bridge, Firebase sync |
 | Web Dashboard | React, Vercel | Dispatcher UI, real-time alert status |
-| Mobile App | Flutter, Firebase | Responder app — in progress on separate machine |
+| Mobile App | Flutter, Firebase, Riverpod | Responder app with Firebase Auth login |
 
 ## UART Protocol
 
@@ -56,7 +56,7 @@ Dashboard: https://medilink-pied.vercel.app
 - [x] FPGA hardware layer complete
 - [x] Spring Boot backend complete
 - [x] React dispatcher dashboard deployed on Vercel
-- [x] Flutter responder app — Firebase Auth working (pushing separately)
+- [x] Flutter responder app — Firebase Auth login complete (responder-app/)
 - [ ] Firestore real-time alerts (in progress)
 - [ ] FCM push notifications
 - [ ] Google Maps responder location
