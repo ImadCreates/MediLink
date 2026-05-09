@@ -1,0 +1,14 @@
+db/
+incremental_db/
+output_files/
+simulation/
+*.jdi
+*.pin
+*.qws
+*.rpt
+*.smsg
+*.sof
+*.pof
+*.rbf
+*.ekp
+*.dpf

@@ -1,0 +1,7 @@
+# Node
+dashboard/node_modules/
+# Spring Boot
+backend/target/
+# VS Code
+.vscode/
+# Quartus compiled output already handled in fpga/.gitignore
