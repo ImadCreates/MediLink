@@ -1,0 +1,12 @@
+# Firebase sensitive files
+lib/firebase_options.dart
+google-services.json
+GoogleService-Info.plist
+.firebaserc
+firebase.json
+# Flutter generated
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
