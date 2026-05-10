@@ -1,0 +1,2 @@
+spring.application.name=dispatcher-backend
+firebase.api.key=YOUR_FIREBASE_WEB_API_KEY_HERE

@@ -2,8 +2,9 @@ package com.example.dispatcher_backend.dto;
 
 import lombok.Data;
 
-@Data // This Lombok annotation automatically handles Getters/Setters
+@Data
 public class AlertRequest {
     private String incidentType;
     private int priority;
+    private String location;
 }

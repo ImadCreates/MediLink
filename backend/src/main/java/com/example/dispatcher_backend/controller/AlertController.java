@@ -2,45 +2,93 @@ package com.example.dispatcher_backend.controller;
 
 import com.example.dispatcher_backend.dto.AlertRequest;
 import com.example.dispatcher_backend.service.SerialService;
+import com.example.dispatcher_backend.service.AlertService;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.beans.factory.annotation.Value;
 
-import com.example.dispatcher_backend.service.AlertService;  // Add this!
 
 import java.util.HashMap;
 import java.util.Map;
-    
+
 @RestController
 @RequestMapping("/api/alerts")
-@CrossOrigin(origins = "http://localhost:5173") // Connects to your React frontend
+@CrossOrigin(origins = "http://localhost:5173")
 public class AlertController {
 
     @Autowired
-    private SerialService serialService; // Inject the new service
+    private SerialService serialService;
 
     @Autowired
-    private AlertService alertService; // Inject the AlertService
+    private AlertService alertService;
+
+    @Value("${firebase.api.key}")
+    private String firebaseApiKey;
 
     @PostMapping("/create")
     public ResponseEntity<Map<String, Object>> createAlert(@RequestBody AlertRequest request) {
-        // 1. Define base codes for types
         int typeOffset = switch (request.getIncidentType()) {
-            case "Fire" -> 10;           // 0x0A
-            case "Medical" -> 20;        // 0x14
-            case "Police" -> 30;         // 0x1E
-            case "Infrastructure" -> 40; // 0x28
+            case "Fire" -> 10;
+            case "Medical" -> 20;
+            case "Police" -> 30;
+            case "Infrastructure" -> 40;
             default -> 0;
         };
 
-        // 2. Combine Type + Priority (e.g., Fire Priority 2 = 12)
         int finalCode = typeOffset + request.getPriority();
 
-        // 3. Send this unique code to the Serial Port
-        serialService.sendEncodedAlert(finalCode);
+        // UART — wrapped separately so failure doesn't block Firestore
+        try {
+            serialService.sendEncodedAlert(finalCode);
+        } catch (Exception e) {
+            System.err.println("UART send failed (no FPGA): " + e.getMessage());
+        }
 
-        // Return the data to React so the UI knows what was sent
+        // Write to Firestore via REST API
+        try {
+            String apiKey = firebaseApiKey;
+            String projectId = "medilink-responder";
+            String url = "https://firestore.googleapis.com/v1/projects/" + projectId + 
+                        "/databases/(default)/documents/alerts";
+
+            String jsonBody = String.format("""
+                {
+                "fields": {
+                    "type": {"stringValue": "%s"},
+                    "location": {"stringValue": "Dispatch - Code %s"},
+                    "status": {"stringValue": "pending"},
+                    "priority": {"integerValue": %d}
+                }
+                }
+                """, 
+                request.getIncidentType(),
+                String.format("0x%02X", finalCode),
+                request.getPriority()
+            );
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest httpRequest = java.net.http.HttpRequest.newBuilder()
+                .uri(java.net.URI.create(url + "?key=" + apiKey))
+                .header("Content-Type", "application/json")
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonBody))
+                .build();
+
+            java.net.http.HttpResponse<String> httpResponse = client.send(
+                httpRequest, 
+                java.net.http.HttpResponse.BodyHandlers.ofString()
+            );
+
+            if (httpResponse.statusCode() == 200) {
+                System.out.println("Firestore REST write successful");
+            } else {
+                System.err.println("Firestore REST write failed: " + httpResponse.body());
+            }
+        } catch (Exception e) {
+            System.err.println("Firestore REST error: " + e.getMessage());
+        }
+
         Map<String, Object> response = new HashMap<>();
         response.put("incident", request.getIncidentType());
         response.put("systemCode", String.format("0x%02X", finalCode));
@@ -49,7 +97,6 @@ public class AlertController {
 
     @GetMapping("/status")
     public ResponseEntity<String> getStatus() {
-        // This calls the AlertService we just created
         return ResponseEntity.ok(alertService.getCurrentStatus());
     }
 }
