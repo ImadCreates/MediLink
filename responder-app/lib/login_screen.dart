@@ -65,20 +65,18 @@ class _LoginScreenState extends State<LoginScreen> {
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
-
-      if (context.mounted) {
-        Navigator.pushReplacement(context,
-        MaterialPageRoute(builder: (context) =>  AlertsScreen()),
-        );
-        }
     } catch (e) {
-      setState(() {
-        _errorMessage = 'Login failed. Check your email and password.';
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Login failed. Check your email and password.';
+        });
+      }
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 }
