@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:medilink_responder/alerts_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -24,7 +25,7 @@ class _LoginScreenState extends State<LoginScreen> {
           children: [
             const Text(
               'MediLink Responder',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.deepPurpleAccent),
             ),
             const SizedBox(height: 32),
             TextField(
@@ -64,6 +65,12 @@ class _LoginScreenState extends State<LoginScreen> {
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
+
+      if (context.mounted) {
+        Navigator.pushReplacement(context,
+        MaterialPageRoute(builder: (context) =>  AlertsScreen()),
+        );
+        }
     } catch (e) {
       setState(() {
         _errorMessage = 'Login failed. Check your email and password.';
