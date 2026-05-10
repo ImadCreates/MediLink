@@ -56,7 +56,7 @@ Dashboard: https://medilink-pied.vercel.app
 - [x] FPGA hardware layer complete
 - [x] Spring Boot backend complete
 - [x] React dispatcher dashboard deployed on Vercel
-- [x] Flutter responder app — Firebase Auth login complete (responder-app/)
-- [ ] Firestore real-time alerts (in progress)
+- [x] Flutter responder app MVP complete — login, real-time alerts, accept/decline, logout
 - [ ] FCM push notifications
 - [ ] Google Maps responder location
+- [ ] UI polish
