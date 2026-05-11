@@ -1,8 +1,5 @@
 [build]
 builder = "nixpacks"
 
-[build.env]
-NIXPACKS_JDK_VERSION = "21"
-
 [deploy]
 startCommand = "java -jar target/dispatcher-backend-0.0.1-SNAPSHOT.jar"
