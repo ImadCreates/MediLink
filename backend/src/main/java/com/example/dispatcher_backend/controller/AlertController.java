@@ -3,12 +3,12 @@ package com.example.dispatcher_backend.controller;
 import com.example.dispatcher_backend.dto.AlertRequest;
 import com.example.dispatcher_backend.service.SerialService;
 import com.example.dispatcher_backend.service.AlertService;
+import com.example.dispatcher_backend.service.FcmNotificationService;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.beans.factory.annotation.Value;
-
 
 import java.util.HashMap;
 import java.util.Map;
@@ -23,6 +23,9 @@ public class AlertController {
 
     @Autowired
     private AlertService alertService;
+
+    @Autowired
+    private FcmNotificationService fcmNotificationService;
 
     @Value("${firebase.api.key}")
     private String firebaseApiKey;
@@ -92,6 +95,12 @@ public class AlertController {
         } catch (Exception e) {
             System.err.println("Firestore REST error: " + e.getMessage());
         }
+
+        // Send FCM push notification to responder
+        fcmNotificationService.sendAlertNotification(
+            request.getIncidentType(),
+            request.getLocation() != null ? request.getLocation() : "Location not specified"
+        );
 
         Map<String, Object> response = new HashMap<>();
         response.put("incident", request.getIncidentType());

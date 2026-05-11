@@ -1,62 +1,153 @@
 # MediLink — Emergency Dispatch System
 
 A full emergency dispatch ecosystem built solo, connecting hardware
-to mobile across four layers.
+to mobile across five layers. Built as a York University EECS capstone
+project to address the lack of affordable real-time dispatch systems
+in under-resourced hospitals and clinical environments.
+
+## The Problem
+
+Most hospitals in developing countries coordinate internal emergencies
+through phone calls and WhatsApp groups. Enterprise CAD (Computer-Aided
+Dispatch) systems that solve this cost hundreds of thousands of dollars
+and require dedicated IT infrastructure — completely out of reach for
+community hospitals and rural clinics. MediLink runs on Firebase's free
+tier and any Android phone. Infrastructure cost is essentially zero.
 
 ## System Architecture
 
+```
 React Dashboard → Spring Boot Backend → UART (COM4) → DE10-Lite FPGA
-                                                            ↓
-Flutter Mobile App ← Firebase ← Spring Boot ← FPGA Status Heartbeat
+                         ↓                                    ↓
+                    Firestore DB ←————————————— FPGA Status Heartbeat
+                         ↓
+              Flutter Mobile Responder App
+                         ↓
+                FCM Push Notification
+```
 
 ## Layers
 
 | Layer | Technology | Description |
 |---|---|---|
-| Hardware | Verilog, DE10-Lite FPGA | 8-module FPGA design with 4-state FSM, UART, VGA |
-| Backend | Java 21, Spring Boot | REST API, UART bridge, Firebase sync |
-| Web Dashboard | React, Vercel | Dispatcher UI, real-time alert status |
-| Mobile App | Flutter, Firebase, Riverpod | Responder app with Firebase Auth login |
+| Hardware | Verilog, DE10-Lite FPGA | 8-module FPGA with 4-state FSM, UART, VGA |
+| Backend | Java 21, Spring Boot | REST API, UART bridge, Firestore write, FCM |
+| Web Dashboard | React, Vercel | Dispatcher UI with real-time Firestore sync |
+| Mobile App | Flutter, Firebase | Responder app with aurora UI, maps, notifications |
+| Notifications | Firebase Cloud Messaging | Push alerts even when app is closed |
+
+## Features
+
+### Dispatcher (React Dashboard)
+- Send emergency alerts with incident type, priority, and location
+- Custom incident types beyond the default categories
+- Real-time responder status updates (Idle, Busy, Off Duty)
+- Dispatch history with live status tracking
+- UART signal display showing hardware byte code
+
+### Responder (Flutter Mobile App)
+- Aurora-themed UI with layered glass panels
+- Real-time incoming alerts via Firestore stream
+- FCM push notifications — alerts fire even when app is closed
+- Accept or Decline alerts
+- OpenStreetMap showing incident location on accept
+- Mark Resolved when incident is handled
+- Self-reported status control (Idle, Busy, Off Duty)
+- Persistent Firebase Auth session
+
+### Hardware (DE10-Lite FPGA)
+- 4-state FSM driven by debounced KEY inputs
+- Custom UART protocol at 9600 baud 8N1
+- 500ms heartbeat status broadcasts to backend
+- VGA display showing alert type and priority
+- Buzzer alarm driver on alert receipt
 
 ## UART Protocol
 
 | Byte | Direction | Meaning |
 |---|---|---|
-| 0x0B–0x2B | PC → FPGA | Alert codes (type + priority) |
+| 0x0B–0x2B | PC → FPGA | Alert codes (type + priority encoded) |
 | 0xAA | FPGA → PC | Accepted |
 | 0xBB | FPGA → PC | Busy |
 | 0xCC | FPGA → PC | Off-Duty |
-| 0xDD | FPGA → PC | Idle |
+| 0xDD | FPGA → PC | Idle / Heartbeat |
 
 ## FPGA Modules
 
-- medilink_top.v — top level, UART latch, 500ms heartbeat TX
-- alert_fsm.v — 4-state FSM with debounced KEY inputs
-- uart_rx.v — 9600 baud 8N1 receiver
-- uart_tx.v — 9600 baud 8N1 transmitter
-- vga_controller.v — 640x480 @ 60Hz sync generator
-- vga_display_gen.v — state colors, type box, priority meter
-- clk_divider.v — 50MHz to 25MHz and 1kHz
-- alarm_driver.v — buzzer square wave driver
+| Module | Description |
+|---|---|
+| medilink_top.v | Top level, UART latch, 500ms heartbeat TX |
+| alert_fsm.v | 4-state FSM with debounced KEY inputs |
+| uart_rx.v | 9600 baud 8N1 receiver |
+| uart_tx.v | 9600 baud 8N1 transmitter |
+| vga_controller.v | 640x480 @ 60Hz sync generator |
+| vga_display_gen.v | State colors, type box, priority meter |
+| clk_divider.v | 50MHz to 25MHz and 1kHz |
+| alarm_driver.v | Buzzer square wave driver |
 
 ## Running the Backend
 
 Requires Java 21 LTS and jSerialComm 2.10.4 exactly.
 jSerialComm 2.11.0 will fail on AMD64 Windows — do not upgrade.
 
-$env:JAVA_HOME = "C:\Program Files\Java\jdk-21"
+Copy `backend/src/main/resources/application.properties.example`
+to `application.properties` and fill in your Firebase Web API key.
+
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21.0.10.7-hotspot"
 .\mvnw.cmd spring-boot:run
+```
+
+## Running the React Dashboard
+
+```bash
+cd dashboard
+cp .env.example .env
+# Add your Firebase Web API key to .env
+npm install
+npm run dev
+```
+
+## Running the Flutter App
+
+```bash
+cd responder-app
+# Add your google-services.json to android/app/
+# Run flutterfire configure to generate firebase_options.dart
+flutter pub get
+flutter run
+```
+
+## Environment Variables
+
+The following files are excluded from the repo and must be created locally:
+
+| File | Purpose |
+|---|---|
+| backend/src/main/resources/application.properties | Firebase API key, Spring Boot config |
+| backend/src/main/resources/serviceAccountKey.json | Firebase Admin SDK credentials |
+| dashboard/.env | Firebase Web API key for React |
+| responder-app/android/app/google-services.json | Firebase Android config |
+| responder-app/lib/firebase_options.dart | Generated by flutterfire configure |
+
+## Known Hardware Notes
+
+- UART uses FTDI TTL-232R-3V3-2mm cable on COM4
+- jSerialComm DLL incompatibility on AMD64 fixed by pinning to 2.10.4
+- FPGA polling in dashboard is commented out — uncomment when FPGA connected
+- QSF pin assignments in medilink_constraints.sdc match DE10-Lite board
 
 ## Live Demo
 
-Dashboard: https://medilink-pied.vercel.app
+React Dashboard: https://medilink-pied.vercel.app
 
 ## Build Status
 
-- [x] FPGA hardware layer complete
-- [x] Spring Boot backend complete
-- [x] React dispatcher dashboard deployed on Vercel
-- [x] Flutter responder app MVP complete — login, real-time alerts, accept/decline, logout
-- [ ] FCM push notifications
-- [ ] Google Maps responder location
-- [ ] UI polish
+- [x] FPGA hardware layer — 8 Verilog modules, UART, FSM, VGA
+- [x] Spring Boot backend — REST API, Firestore write, FCM send
+- [x] React dispatcher dashboard — deployed on Vercel
+- [x] Flutter responder app — aurora UI, glass design, maps
+- [x] Real-time Firestore alerts
+- [x] OpenStreetMap incident location on accept
+- [x] Responder status control
+- [x] FCM push notifications on real device
