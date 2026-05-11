@@ -1,0 +1,5 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "java -jar target/dispatcher-backend-0.0.1-SNAPSHOT.jar"
