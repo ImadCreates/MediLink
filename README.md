@@ -141,6 +141,13 @@ The following files are excluded from the repo and must be created locally:
 
 React Dashboard: https://medilink-pied.vercel.app
 
+## Demo Videos
+
+| Video | Description |
+|---|---|
+| [Full System Demo](https://youtu.be/ykPL2PVdLWw) | Dispatcher sends alert → FCM notification fires on phone → Responder accepts → Map loads → Dashboard updates in real time |
+| [Hardware Demo](https://youtu.be/KYjn9Eqjglw) | DE10-Lite FPGA running 8 Verilog modules — UART protocol, 4-state FSM, VGA display, buzzer alarm |
+
 ## Build Status
 
 - [x] FPGA hardware layer — 8 Verilog modules, UART, FSM, VGA
