@@ -38,8 +38,18 @@ public class FcmNotificationService {
             }
 
             // Get OAuth2 access token from service account
-            InputStream serviceAccount = getClass().getClassLoader()
-                .getResourceAsStream("serviceAccountKey.json");
+            String serviceAccountJson = System.getenv("FIREBASE_SERVICE_ACCOUNT");
+            InputStream serviceAccount;
+            if (serviceAccountJson != null && !serviceAccountJson.isEmpty()) {
+                System.out.println("FCM: Loading credentials from environment variable");
+                serviceAccount = new java.io.ByteArrayInputStream(
+                    serviceAccountJson.getBytes()
+                );
+            } else {
+                System.out.println("FCM: Loading credentials from local file");
+                serviceAccount = getClass().getClassLoader()
+                    .getResourceAsStream("serviceAccountKey.json");
+            }
 
             GoogleCredentials credentials = GoogleCredentials
                 .fromStream(serviceAccount)
