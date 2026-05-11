@@ -22,7 +22,7 @@ class AlertsScreen extends StatelessWidget {
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
             .collection('alerts')
-            .where('status', isEqualTo: 'pending')
+            .where('status', whereIn: ['pending', 'accepted'])
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -57,19 +57,25 @@ class AlertsScreen extends StatelessWidget {
                       const SizedBox(height: 16),
                       Row(
                         children: [
-                          ElevatedButton(
-                            onPressed: () => _updateStatus(docId, 'accepted'),
-                            style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.green),
-                            child: const Text('Accept'),
-                          ),
-                          const SizedBox(width: 12),
-                          ElevatedButton(
-                            onPressed: () => _updateStatus(docId, 'declined'),
-                            style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red),
-                            child: const Text('Decline'),
-                          ),
+                          if (data['status'] == 'pending') ...[
+                            ElevatedButton(
+                              onPressed: () => _updateStatus(docId, 'accepted'),
+                              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                              child: const Text('Accept'),
+                            ),
+                            const SizedBox(width: 12),
+                            ElevatedButton(
+                              onPressed: () => _updateStatus(docId, 'declined'),
+                              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                              child: const Text('Decline'),
+                            ),
+                          ] else if (data['status'] == 'accepted') ...[
+                            ElevatedButton(
+                              onPressed: () => _updateStatus(docId, 'resolved'),
+                              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                              child: const Text('Mark Resolved'),
+                            ),
+                          ],
                         ],
                       ),
                     ],

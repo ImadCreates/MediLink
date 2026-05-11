@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import './dashboard.css';
+import { collection, onSnapshot, query } from 'firebase/firestore';
+import { db } from '../services/firebase';
 
 const INCIDENT_META = {
   Fire:           { icon: '🔥', color: '#f85149' },
@@ -85,34 +87,30 @@ const Dashboard = () => {
   const [history, setHistory] = useState([]);
   const [currentStatus, setCurrentStatus] = useState('IDLE');
 
-  // Poll backend every 2 s
+  // Listen to Firestore alerts in real time
   useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const { data: statusFromServer } = await axios.get('http://localhost:8080/api/alerts/status');
-        setCurrentStatus(statusFromServer);
+    const q = query(collection(db, 'alerts'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'modified') {
+          const data = change.doc.data();
+          const status = data.status;
 
-        if (statusFromServer === 'IN_PROGRESS') {
-          setLastAlert(prev => prev ? { ...prev, status: 'IN_PROGRESS' } : prev);
-          setHistory(prev => prev.map((item, i) => i === 0 ? { ...item, status: 'IN_PROGRESS' } : item));
-        } else if (statusFromServer === 'BUSY') {
-          setLastAlert(prev => prev ? { ...prev, status: 'BUSY' } : prev);
-          setHistory(prev => prev.map((item, i) => i === 0 ? { ...item, status: 'BUSY' } : item));
-        } else if (statusFromServer === 'OFF_DUTY') {
-          setLastAlert(prev => prev ? { ...prev, status: 'OFF_DUTY' } : prev);
-          setHistory(prev => prev.map((item, i) => i === 0 ? { ...item, status: 'OFF_DUTY' } : item));
-        } else if (statusFromServer === 'IDLE') {
-          // Mark last alert as COMPLETED instead of wiping it — keep it visible
-          setLastAlert(prev => prev && prev.status === 'IN_PROGRESS' ? { ...prev, status: 'COMPLETED' } : prev);
-          setHistory(prev => prev.map((item, i) =>
-            i === 0 && item.status === 'IN_PROGRESS' ? { ...item, status: 'COMPLETED' } : item
-          ));
+          // Map Firestore status to dashboard status
+          let dashboardStatus = null;
+          if (status === 'accepted') dashboardStatus = 'IN_PROGRESS';
+          if (status === 'declined') dashboardStatus = 'BUSY';
+          if (status === 'resolved') dashboardStatus = 'COMPLETED';
+
+          if (dashboardStatus) {
+            setCurrentStatus(dashboardStatus);
+            setLastAlert(prev => prev ? { ...prev, status: dashboardStatus } : prev);
+            setHistory(prev => prev.map((item, i) => i === 0 ? { ...item, status: dashboardStatus } : item));
+          }
         }
-      } catch (err) {
-        console.error('Status poll failed:', err);
-      }
-    }, 2000);
-    return () => clearInterval(interval);
+      });
+    });
+    return () => unsubscribe();
   }, []);
 
   const handleCreateAlert = async (e) => {
