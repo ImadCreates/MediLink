@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import './dashboard.css';
-import { collection, onSnapshot, query } from 'firebase/firestore';
+import { collection, onSnapshot, query, doc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 
 const INCIDENT_META = {
@@ -82,10 +82,71 @@ const StatusBadge = ({ status }) => {
 
 const Dashboard = () => {
   const [incidentType, setIncidentType] = useState('Fire');
+  const [customType, setCustomType] = useState('');
+  const [useCustomType, setUseCustomType] = useState(false);
   const [priority, setPriority] = useState('1');
+  const [location, setLocation] = useState('');
   const [lastAlert, setLastAlert] = useState(null);
   const [history, setHistory] = useState([]);
   const [currentStatus, setCurrentStatus] = useState('IDLE');
+
+  /*
+   * ══════════════════════════════════════════════════════════════
+   * HARDWARE MODE — FPGA STATUS POLLING
+   * Uncomment this entire useEffect when the DE10-Lite FPGA is
+   * connected via UART on COM4 and the Spring Boot backend is
+   * running with jSerialComm 2.10.4 + Java 21 LTS.
+   *
+   * This polls the /api/alerts/status endpoint every 2 seconds
+   * and maps the FPGA heartbeat bytes to dashboard status:
+   *   0xAA → IN_PROGRESS (responder accepted via KEY[0])
+   *   0xBB → BUSY        (responder busy via SW[1:0])
+   *   0xCC → OFF_DUTY    (responder off duty via SW[1:0])
+   *   0xDD → IDLE        (responder idle, back to standby)
+   *
+   * The Firestore listener below handles status when no FPGA
+   * is connected — remove it or let both run when FPGA is live.
+   * ══════════════════════════════════════════════════════════════
+   *
+   * useEffect(() => {
+   *   const interval = setInterval(async () => {
+   *     try {
+   *       const { data: statusFromServer } = await axios.get(
+   *         'http://localhost:8080/api/alerts/status'
+   *       );
+   *       setCurrentStatus(statusFromServer);
+   *
+   *       if (statusFromServer === 'IN_PROGRESS') {
+   *         setLastAlert(prev => prev ? { ...prev, status: 'IN_PROGRESS' } : prev);
+   *         setHistory(prev => prev.map((item, i) =>
+   *           i === 0 ? { ...item, status: 'IN_PROGRESS' } : item));
+   *       } else if (statusFromServer === 'BUSY') {
+   *         setLastAlert(prev => prev ? { ...prev, status: 'BUSY' } : prev);
+   *         setHistory(prev => prev.map((item, i) =>
+   *           i === 0 ? { ...item, status: 'BUSY' } : item));
+   *       } else if (statusFromServer === 'OFF_DUTY') {
+   *         setLastAlert(prev => prev ? { ...prev, status: 'OFF_DUTY' } : prev);
+   *         setHistory(prev => prev.map((item, i) =>
+   *           i === 0 ? { ...item, status: 'OFF_DUTY' } : item));
+   *       } else if (statusFromServer === 'IDLE') {
+   *         setLastAlert(prev =>
+   *           prev && prev.status === 'IN_PROGRESS'
+   *             ? { ...prev, status: 'COMPLETED' }
+   *             : prev
+   *         );
+   *         setHistory(prev => prev.map((item, i) =>
+   *           i === 0 && item.status === 'IN_PROGRESS'
+   *             ? { ...item, status: 'COMPLETED' }
+   *             : item
+   *         ));
+   *       }
+   *     } catch (err) {
+   *       console.error('FPGA status poll failed:', err);
+   *     }
+   *   }, 2000);
+   *   return () => clearInterval(interval);
+   * }, []);
+   */
 
   // Listen to Firestore alerts in real time
   useEffect(() => {
@@ -96,20 +157,43 @@ const Dashboard = () => {
           const data = change.doc.data();
           const status = data.status;
 
-          // Map Firestore status to dashboard status
-          let dashboardStatus = null;
-          if (status === 'accepted') dashboardStatus = 'IN_PROGRESS';
-          if (status === 'declined') dashboardStatus = 'BUSY';
-          if (status === 'resolved') dashboardStatus = 'COMPLETED';
-
-          if (dashboardStatus) {
-            setCurrentStatus(dashboardStatus);
-            setLastAlert(prev => prev ? { ...prev, status: dashboardStatus } : prev);
-            setHistory(prev => prev.map((item, i) => i === 0 ? { ...item, status: dashboardStatus } : item));
+          if (status === 'accepted') {
+            setCurrentStatus('IN_PROGRESS');
+            setLastAlert(prev => prev ? { ...prev, status: 'IN_PROGRESS' } : prev);
+            setHistory(prev => prev.map((item, i) => i === 0 ? { ...item, status: 'IN_PROGRESS' } : item));
+          }
+          if (status === 'declined') {
+            setCurrentStatus('BUSY');
+            setLastAlert(prev => prev ? { ...prev, status: 'BUSY' } : prev);
+            setHistory(prev => prev.map((item, i) => i === 0 ? { ...item, status: 'BUSY' } : item));
+            setTimeout(() => {
+              setCurrentStatus('IDLE');
+            }, 3000);
+          }
+          if (status === 'resolved') {
+            setCurrentStatus('IDLE');
+            setLastAlert(prev => prev ? { ...prev, status: 'COMPLETED' } : prev);
+            setHistory(prev => prev.map((item, i) => i === 0 ? { ...item, status: 'COMPLETED' } : item));
           }
         }
       });
     });
+    return () => unsubscribe();
+  }, []);
+
+  // Listen to responder self-reported status in real time
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      doc(db, 'responder_status', 'current'),
+      (docSnapshot) => {
+        if (docSnapshot.exists()) {
+          const status = docSnapshot.data().status;
+          if (status === 'idle') setCurrentStatus('IDLE');
+          if (status === 'busy') setCurrentStatus('BUSY');
+          if (status === 'off_duty') setCurrentStatus('OFF_DUTY');
+        }
+      }
+    );
     return () => unsubscribe();
   }, []);
 
@@ -121,8 +205,9 @@ const Dashboard = () => {
     }
     try {
       const { data } = await axios.post('http://localhost:8080/api/alerts/create', {
-        incidentType,
+        incidentType: useCustomType && customType.trim() ? customType.trim() : incidentType,
         priority: parseInt(priority),
+        location: location || 'Location not specified',
       });
       const newAlert = {
         type: data.incident,
@@ -133,6 +218,8 @@ const Dashboard = () => {
       };
       setLastAlert(newAlert);
       setHistory(prev => [newAlert, ...prev]);
+      setLocation('');
+      if (useCustomType) setCustomType('');
     } catch (err) {
       console.error('Alert creation failed:', err);
       alert('Backend connection failed!');
@@ -233,6 +320,47 @@ const Dashboard = () => {
                   </button>
                 ))}
               </div>
+              <div style={{ marginTop: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setUseCustomType(!useCustomType)}
+                  className="priority-btn"
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: `1px solid ${useCustomType ? '#a855f7' : '#30363d'}`,
+                    background: useCustomType ? 'rgba(168,85,247,0.1)' : '#0d1117',
+                    color: useCustomType ? '#a855f7' : '#8b949e',
+                    fontSize: '13px',
+                    fontWeight: useCustomType ? '600' : '400',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  ✏️ Custom Incident Type
+                </button>
+                {useCustomType && (
+                  <input
+                    type="text"
+                    value={customType}
+                    onChange={(e) => setCustomType(e.target.value)}
+                    placeholder="e.g. Gas Leak, Flood, Explosion..."
+                    style={{
+                      marginTop: '8px',
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #30363d',
+                      background: '#0d1117',
+                      color: '#e6edf3',
+                      fontSize: '13px',
+                      outline: 'none',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                )}
+              </div>
             </div>
 
             {/* Priority */}
@@ -262,6 +390,28 @@ const Dashboard = () => {
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Location */}
+            <div>
+              <SectionLabel>Incident Location</SectionLabel>
+              <input
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="e.g. Toronto General Hospital, 200 Elizabeth St"
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #30363d',
+                  background: '#0d1117',
+                  color: '#e6edf3',
+                  fontSize: '13px',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
             </div>
 
             {/* Submit */}

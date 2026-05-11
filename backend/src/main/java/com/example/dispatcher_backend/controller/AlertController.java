@@ -53,18 +53,22 @@ public class AlertController {
             String url = "https://firestore.googleapis.com/v1/projects/" + projectId + 
                         "/databases/(default)/documents/alerts";
 
+            String location = (request.getLocation() != null && !request.getLocation().isEmpty())
+                ? request.getLocation()
+                : "Location not specified";
+
             String jsonBody = String.format("""
                 {
                 "fields": {
                     "type": {"stringValue": "%s"},
-                    "location": {"stringValue": "Dispatch - Code %s"},
+                    "location": {"stringValue": "%s"},
                     "status": {"stringValue": "pending"},
                     "priority": {"integerValue": %d}
                 }
                 }
-                """, 
+                """,
                 request.getIncidentType(),
-                String.format("0x%02X", finalCode),
+                location,
                 request.getPriority()
             );
 
