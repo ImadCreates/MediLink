@@ -1,5 +1,8 @@
 [build]
-builder = "railpack"  # Change from "nixpacks" to "railpack"
+builder = "railpack"
+
+[build.env]
+RAILPACK_DISABLE_FIREBASE = "true"
 
 [deploy]
 startCommand = "java -jar target/dispatcher-backend-0.0.1-SNAPSHOT.jar"
