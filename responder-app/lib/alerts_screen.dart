@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 
 class AlertsScreen extends StatefulWidget {
   const AlertsScreen({super.key});
@@ -414,6 +415,19 @@ class _AlertCardState extends State<_AlertCard> {
     });
   }
 
+  Future<void> _openGoogleMaps(String location) async {
+    final encoded = Uri.encodeComponent(location);
+    final googleMapsUrl = Uri.parse(
+      'https://www.google.com/maps/search/?api=1&query=$encoded'
+    );
+    if (await canLaunchUrl(googleMapsUrl)) {
+      await launchUrl(
+        googleMapsUrl,
+        mode: LaunchMode.externalApplication,
+      );
+    }
+  }
+
   Color get _accentColor {
     final status = widget.data['status'];
     if (status == 'accepted') return const Color(0xFF3b82f6);
@@ -560,6 +574,43 @@ class _AlertCardState extends State<_AlertCard> {
             Container(
               height: 1,
               color: Colors.white.withOpacity(0.07),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: GestureDetector(
+                onTap: () => _openGoogleMaps(widget.data['location'] ?? ''),
+                child: Container(
+                  width: double.infinity,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    color: const Color(0xFF1a1a2e),
+                    border: Border.all(
+                      color: const Color(0xFF3b82f6).withOpacity(0.4),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.directions,
+                        color: const Color(0xFF3b82f6),
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Get Directions in Google Maps',
+                        style: TextStyle(
+                          color: const Color(0xFF3b82f6),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
             ClipRRect(
               borderRadius: const BorderRadius.only(
