@@ -112,7 +112,7 @@ const Dashboard = () => {
    *   const interval = setInterval(async () => {
    *     try {
    *       const { data: statusFromServer } = await axios.get(
-   *         'http://localhost:8080/api/alerts/status'
+   *         'https://medilink-production-f576.up.railway.app/api/alerts/status'
    *       );
    *       setCurrentStatus(statusFromServer);
    *
@@ -204,7 +204,7 @@ const Dashboard = () => {
       return;
     }
     try {
-      const { data } = await axios.post('http://localhost:8080/api/alerts/create', {
+      const { data } = await axios.post('https://medilink-production-f576.up.railway.app/api/alerts/create', {
         incidentType: useCustomType && customType.trim() ? customType.trim() : incidentType,
         priority: parseInt(priority),
         location: location || 'Location not specified',
