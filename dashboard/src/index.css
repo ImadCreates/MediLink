@@ -1,10 +1,45 @@
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&display=swap');
+
+@keyframes auroraOrb1 {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.35; }
+  50%       { transform: translate(24px, -32px) scale(1.08); opacity: 0.52; }
+}
+@keyframes auroraOrb2 {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.2; }
+  50%       { transform: translate(-28px, 22px) scale(1.06); opacity: 0.32; }
+}
+@keyframes auroraOrb3 {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.25; }
+  50%       { transform: translate(18px, 28px) scale(1.07); opacity: 0.38; }
+}
+@keyframes ringRotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes starPulse {
+  0%, 100% { opacity: 0.6; }
+  50%       { opacity: 1; }
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes scrollBounce {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(8px); }
+}
+@keyframes chevronBounce {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(6px); }
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: 'Sora', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   background: #0d1117;
   color: #e6edf3;
   -webkit-font-smoothing: antialiased;

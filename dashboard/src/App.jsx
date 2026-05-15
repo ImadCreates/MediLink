@@ -1,17 +1,29 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
+import ProtectedRoute from './components/ProtectedRoute';
 import Dashboard from './pages/Dashboard';
-import SystemMonitor from './pages/SystemMonitor';
+import LandingHome from './pages/LandingHome';
+import Login from './pages/Login';
+import ResponderPage from './pages/ResponderPage';
 
 function App() {
   return (
     <Router>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/monitor" element={<SystemMonitor />} />
-        </Routes>
-      </Layout>
+      <Routes>
+        <Route path="/" element={<LandingHome />} />
+        <Route path="/dispatcher" element={<Login />} />
+        <Route path="/responder" element={<ResponderPage />} />
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <Dashboard />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
     </Router>
   );
 }

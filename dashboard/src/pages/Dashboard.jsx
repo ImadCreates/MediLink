@@ -1,8 +1,88 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './dashboard.css';
 import { collection, onSnapshot, query, doc } from 'firebase/firestore';
 import { db } from '../services/firebase';
+import { getAuth, signOut } from 'firebase/auth';
+import { useNavigate } from 'react-router-dom';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+
+// ── Fix Leaflet default icon missing-image issue ──────────────────────────────
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+});
+
+// ── Custom div icons ──────────────────────────────────────────────────────────
+const makeResponderIcon = (isNearest) =>
+  L.divIcon({
+    className: '',
+    html: `<div style="
+      width:14px;height:14px;border-radius:50%;
+      background:${isNearest ? '#3fb950' : '#58a6ff'};
+      border:2px solid ${isNearest ? '#26a641' : '#388bfd'};
+      box-shadow:0 0 8px ${isNearest ? 'rgba(63,185,80,0.7)' : 'rgba(88,166,255,0.5)'};
+    "></div>`,
+    iconSize: [14, 14],
+    iconAnchor: [7, 7],
+  });
+
+const incidentIcon = L.divIcon({
+  className: '',
+  html: `<div style="
+    width:16px;height:16px;border-radius:50%;
+    background:#f85149;
+    border:2px solid #da3633;
+    box-shadow:0 0 12px rgba(248,81,73,0.8);
+  "></div>`,
+  iconSize: [16, 16],
+  iconAnchor: [8, 8],
+});
+
+// ── Haversine distance (km) ───────────────────────────────────────────────────
+function haversine(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ── Nominatim geocode ─────────────────────────────────────────────────────────
+async function geocode(address) {
+  if (!address || address.trim() === '') return null;
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`;
+    const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    const data = await res.json();
+    if (data.length > 0) return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+  } catch (_) {}
+  return null;
+}
+
+// ── RecenterMap — re-fits bounds when markers change ─────────────────────────
+function RecenterMap({ incidentCoords, responders }) {
+  const map = useMap();
+  useEffect(() => {
+    const points = [];
+    if (incidentCoords) points.push([incidentCoords.lat, incidentCoords.lng]);
+    responders.forEach((r) => points.push([r.lat, r.lng]));
+    if (points.length === 1) {
+      map.setView(points[0], 13);
+    } else if (points.length > 1) {
+      map.fitBounds(points, { padding: [40, 40] });
+    }
+  }, [incidentCoords, responders, map]);
+  return null;
+}
 
 const INCIDENT_META = {
   Fire:           { icon: '🔥', color: '#f85149' },
@@ -19,9 +99,9 @@ const STATUS_CONFIG = {
 };
 
 const PRIORITY_CONFIG = {
-  '1': { label: 'low', color: '#f85149', bg: 'rgba(248,81,73,0.1)',   border: 'rgba(248,81,73,0.3)' },
-  '2': { label: 'Medium',   color: '#3fb950', bg: 'rgba(63,185,80,0.1)',  border: 'rgba(63,185,80,0.3)' },
-  '3': { label: 'High',     color: '#e3b341', bg: 'rgba(227,179,65,0.1)', border: 'rgba(227,179,65,0.3)' },
+  '1': { label: 'Low',    color: '#f85149', bg: 'rgba(248,81,73,0.1)',   border: 'rgba(248,81,73,0.3)' },
+  '2': { label: 'Medium', color: '#3fb950', bg: 'rgba(63,185,80,0.1)',  border: 'rgba(63,185,80,0.3)' },
+  '3': { label: 'High',   color: '#e3b341', bg: 'rgba(227,179,65,0.1)', border: 'rgba(227,179,65,0.3)' },
 };
 
 const ALERT_STATUS_CONFIG = {
@@ -81,14 +161,31 @@ const StatusBadge = ({ status }) => {
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 
 const Dashboard = () => {
-  const [incidentType, setIncidentType] = useState('Fire');
-  const [customType, setCustomType] = useState('');
+  const navigate = useNavigate();
+
+  const [incidentType, setIncidentType]   = useState('Fire');
+  const [customType, setCustomType]       = useState('');
   const [useCustomType, setUseCustomType] = useState(false);
-  const [priority, setPriority] = useState('1');
-  const [location, setLocation] = useState('');
-  const [lastAlert, setLastAlert] = useState(null);
-  const [history, setHistory] = useState([]);
+  const [priority, setPriority]           = useState('1');
+  const [locationInput, setLocationInput] = useState('');
+  const [lastAlert, setLastAlert]         = useState(null);
+  const [history, setHistory]             = useState([]);
   const [currentStatus, setCurrentStatus] = useState('IDLE');
+
+  // Map state
+  const [responders, setResponders]           = useState([]);
+  const [incidentCoords, setIncidentCoords]   = useState(null);
+  const [nearestResponderId, setNearestResponderId] = useState(null);
+
+  // ── Logout ──────────────────────────────────────────────────────────────────
+  const handleLogout = async () => {
+    try {
+      await signOut(getAuth());
+      navigate('/dispatcher');
+    } catch (err) {
+      console.error('Logout failed:', err);
+    }
+  };
 
   /*
    * ══════════════════════════════════════════════════════════════
@@ -148,7 +245,7 @@ const Dashboard = () => {
    * }, []);
    */
 
-  // Listen to Firestore alerts in real time
+  // ── Firestore: alert status changes ────────────────────────────────────────
   useEffect(() => {
     const q = query(collection(db, 'alerts'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -166,9 +263,7 @@ const Dashboard = () => {
             setCurrentStatus('BUSY');
             setLastAlert(prev => prev ? { ...prev, status: 'BUSY' } : prev);
             setHistory(prev => prev.map((item, i) => i === 0 ? { ...item, status: 'BUSY' } : item));
-            setTimeout(() => {
-              setCurrentStatus('IDLE');
-            }, 3000);
+            setTimeout(() => setCurrentStatus('IDLE'), 3000);
           }
           if (status === 'resolved') {
             setCurrentStatus('IDLE');
@@ -181,15 +276,15 @@ const Dashboard = () => {
     return () => unsubscribe();
   }, []);
 
-  // Listen to responder self-reported status in real time
+  // ── Firestore: responder self-reported status ───────────────────────────────
   useEffect(() => {
     const unsubscribe = onSnapshot(
       doc(db, 'responder_status', 'current'),
       (docSnapshot) => {
         if (docSnapshot.exists()) {
           const status = docSnapshot.data().status;
-          if (status === 'idle') setCurrentStatus('IDLE');
-          if (status === 'busy') setCurrentStatus('BUSY');
+          if (status === 'idle')     setCurrentStatus('IDLE');
+          if (status === 'busy')     setCurrentStatus('BUSY');
           if (status === 'off_duty') setCurrentStatus('OFF_DUTY');
         }
       }
@@ -197,6 +292,32 @@ const Dashboard = () => {
     return () => unsubscribe();
   }, []);
 
+  // ── Firestore: live responder locations ────────────────────────────────────
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'responders'), (snapshot) => {
+      const list = snapshot.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((r) => r.lat != null && r.lng != null);
+      setResponders(list);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // ── Recompute nearest responder whenever responders or incident changes ─────
+  useEffect(() => {
+    if (!incidentCoords || responders.length === 0) {
+      setNearestResponderId(null);
+      return;
+    }
+    let nearest = null, bestDist = Infinity;
+    responders.forEach((r) => {
+      const d = haversine(incidentCoords.lat, incidentCoords.lng, r.lat, r.lng);
+      if (d < bestDist) { bestDist = d; nearest = r.id; }
+    });
+    setNearestResponderId(nearest);
+  }, [incidentCoords, responders]);
+
+  // ── Create alert ────────────────────────────────────────────────────────────
   const handleCreateAlert = async (e) => {
     e.preventDefault();
     if (currentStatus === 'BUSY' || currentStatus === 'OFF_DUTY') {
@@ -204,21 +325,27 @@ const Dashboard = () => {
       return;
     }
     try {
-      const { data } = await axios.post('https://medilink-production-f576.up.railway.app/api/alerts/create', {
-        incidentType: useCustomType && customType.trim() ? customType.trim() : incidentType,
-        priority: parseInt(priority),
-        location: location || 'Location not specified',
-      });
+      const resolvedType = useCustomType && customType.trim() ? customType.trim() : incidentType;
+      const { data } = await axios.post(
+        'https://medilink-production-f576.up.railway.app/api/alerts/create',
+        { incidentType: resolvedType, priority: parseInt(priority), location: locationInput || 'Location not specified' }
+      );
+
+      // Geocode and update map
+      const coords = await geocode(locationInput);
+      if (coords) setIncidentCoords(coords);
+
       const newAlert = {
-        type: data.incident,
+        type:        data.incident,
         priority,
         binary_code: data.systemCode,
-        time: new Date().toLocaleTimeString(),
-        status: 'SENT',
+        time:        new Date().toLocaleTimeString(),
+        location:    locationInput || '—',
+        status:      'SENT',
       };
       setLastAlert(newAlert);
       setHistory(prev => [newAlert, ...prev]);
-      setLocation('');
+      setLocationInput('');
       if (useCustomType) setCustomType('');
     } catch (err) {
       console.error('Alert creation failed:', err);
@@ -226,8 +353,12 @@ const Dashboard = () => {
     }
   };
 
-  const sc = STATUS_CONFIG[currentStatus] || STATUS_CONFIG.IDLE;
+  const sc      = STATUS_CONFIG[currentStatus] || STATUS_CONFIG.IDLE;
   const blocked = currentStatus === 'BUSY' || currentStatus === 'OFF_DUTY';
+  const nearestResponder = responders.find((r) => r.id === nearestResponderId);
+
+  // Default map center: Toronto
+  const defaultCenter = [43.6532, -79.3832];
 
   return (
     <div style={{ padding: '32px', minHeight: '100vh', background: '#0d1117' }}>
@@ -248,33 +379,50 @@ const Dashboard = () => {
           </p>
         </div>
 
-        {/* Live Status Pill */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          padding: '9px 18px',
-          borderRadius: '24px',
-          background: sc.bg,
-          border: `1px solid ${sc.border}`,
-          color: sc.color,
-          fontSize: '12px',
-          fontWeight: '700',
-          letterSpacing: '0.05em',
-          textTransform: 'uppercase',
-          marginTop: '4px',
-        }}>
-          <span
-            className={currentStatus !== 'IDLE' ? 'status-dot-active' : ''}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
+          {/* Live Status Pill */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '9px 18px',
+            borderRadius: '24px',
+            background: sc.bg,
+            border: `1px solid ${sc.border}`,
+            color: sc.color,
+            fontSize: '12px',
+            fontWeight: '700',
+            letterSpacing: '0.05em',
+            textTransform: 'uppercase',
+          }}>
+            <span
+              className={currentStatus !== 'IDLE' ? 'status-dot-active' : ''}
+              style={{
+                width: '7px', height: '7px', borderRadius: '50%',
+                background: sc.color, flexShrink: 0,
+              }}
+            />
+            Responder · {sc.label}
+          </div>
+
+          {/* Sign Out button */}
+          <button
+            onClick={handleLogout}
             style={{
-              width: '7px',
-              height: '7px',
-              borderRadius: '50%',
-              background: sc.color,
-              flexShrink: 0,
+              padding: '8px 16px',
+              borderRadius: '8px',
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'rgba(255,255,255,0.06)',
+              color: 'rgba(255,255,255,0.6)',
+              fontSize: '12px',
+              fontWeight: '500',
+              cursor: 'pointer',
+              letterSpacing: '0.02em',
+              fontFamily: 'inherit',
             }}
-          />
-          Responder · {sc.label}
+          >
+            Sign Out
+          </button>
         </div>
       </div>
 
@@ -301,18 +449,13 @@ const Dashboard = () => {
                     onClick={() => setIncidentType(type)}
                     className="priority-btn"
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      padding: '10px 12px',
-                      borderRadius: '8px',
+                      display: 'flex', alignItems: 'center', gap: '8px',
+                      padding: '10px 12px', borderRadius: '8px',
                       border: `1px solid ${incidentType === type ? meta.color : '#30363d'}`,
                       background: incidentType === type ? `${meta.color}15` : '#0d1117',
                       color: incidentType === type ? meta.color : '#8b949e',
-                      fontSize: '13px',
-                      fontWeight: incidentType === type ? '600' : '400',
-                      cursor: 'pointer',
-                      textAlign: 'left',
+                      fontSize: '13px', fontWeight: incidentType === type ? '600' : '400',
+                      cursor: 'pointer', textAlign: 'left',
                     }}
                   >
                     <span style={{ fontSize: '16px' }}>{meta.icon}</span>
@@ -326,16 +469,12 @@ const Dashboard = () => {
                   onClick={() => setUseCustomType(!useCustomType)}
                   className="priority-btn"
                   style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: '8px',
+                    width: '100%', padding: '10px 12px', borderRadius: '8px',
                     border: `1px solid ${useCustomType ? '#a855f7' : '#30363d'}`,
                     background: useCustomType ? 'rgba(168,85,247,0.1)' : '#0d1117',
                     color: useCustomType ? '#a855f7' : '#8b949e',
-                    fontSize: '13px',
-                    fontWeight: useCustomType ? '600' : '400',
-                    cursor: 'pointer',
-                    textAlign: 'left',
+                    fontSize: '13px', fontWeight: useCustomType ? '600' : '400',
+                    cursor: 'pointer', textAlign: 'left',
                   }}
                 >
                   ✏️ Custom Incident Type
@@ -347,16 +486,10 @@ const Dashboard = () => {
                     onChange={(e) => setCustomType(e.target.value)}
                     placeholder="e.g. Gas Leak, Flood, Explosion..."
                     style={{
-                      marginTop: '8px',
-                      width: '100%',
-                      padding: '10px 12px',
-                      borderRadius: '8px',
-                      border: '1px solid #30363d',
-                      background: '#0d1117',
-                      color: '#e6edf3',
-                      fontSize: '13px',
-                      outline: 'none',
-                      boxSizing: 'border-box',
+                      marginTop: '8px', width: '100%', padding: '10px 12px',
+                      borderRadius: '8px', border: '1px solid #30363d',
+                      background: '#0d1117', color: '#e6edf3', fontSize: '13px',
+                      outline: 'none', boxSizing: 'border-box',
                     }}
                   />
                 )}
@@ -374,15 +507,11 @@ const Dashboard = () => {
                     onClick={() => setPriority(p)}
                     className="priority-btn"
                     style={{
-                      flex: 1,
-                      padding: '10px 6px',
-                      borderRadius: '8px',
+                      flex: 1, padding: '10px 6px', borderRadius: '8px',
                       border: `1px solid ${priority === p ? cfg.color : '#30363d'}`,
                       background: priority === p ? cfg.bg : '#0d1117',
                       color: priority === p ? cfg.color : '#8b949e',
-                      fontSize: '12px',
-                      fontWeight: '600',
-                      cursor: 'pointer',
+                      fontSize: '12px', fontWeight: '600', cursor: 'pointer',
                       letterSpacing: '0.02em',
                     }}
                   >
@@ -397,18 +526,13 @@ const Dashboard = () => {
               <SectionLabel>Incident Location</SectionLabel>
               <input
                 type="text"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
+                value={locationInput}
+                onChange={(e) => setLocationInput(e.target.value)}
                 placeholder="e.g. Toronto General Hospital, 200 Elizabeth St"
                 style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  borderRadius: '8px',
-                  border: '1px solid #30363d',
-                  background: '#0d1117',
-                  color: '#e6edf3',
-                  fontSize: '13px',
-                  outline: 'none',
+                  width: '100%', padding: '10px 12px', borderRadius: '8px',
+                  border: '1px solid #30363d', background: '#0d1117',
+                  color: '#e6edf3', fontSize: '13px', outline: 'none',
                   boxSizing: 'border-box',
                 }}
               />
@@ -420,17 +544,12 @@ const Dashboard = () => {
               disabled={blocked}
               className="submit-btn"
               style={{
-                padding: '12px',
-                borderRadius: '8px',
-                border: 'none',
+                padding: '12px', borderRadius: '8px', border: 'none',
                 background: blocked ? '#21262d' : '#f85149',
                 color: blocked ? '#656d76' : 'white',
-                fontSize: '13px',
-                fontWeight: '700',
+                fontSize: '13px', fontWeight: '700',
                 cursor: blocked ? 'not-allowed' : 'pointer',
-                letterSpacing: '0.05em',
-                textTransform: 'uppercase',
-                marginTop: '2px',
+                letterSpacing: '0.05em', textTransform: 'uppercase', marginTop: '2px',
               }}
             >
               {blocked
@@ -441,110 +560,98 @@ const Dashboard = () => {
           </form>
         </Card>
 
-        {/* Live Transmission */}
-        <Card style={{ padding: '24px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '22px', paddingBottom: '16px', borderBottom: '1px solid #21262d' }}>
-            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#58a6ff', boxShadow: '0 0 8px rgba(88,166,255,0.5)' }} />
-            <h2 style={{ fontSize: '14px', fontWeight: '600', color: '#e6edf3' }}>Live Transmission</h2>
+        {/* ── Live Responder Map ── */}
+        <Card style={{ padding: '0', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          {/* Card header */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '8px',
+            padding: '16px 20px', borderBottom: '1px solid #21262d', flexShrink: 0,
+          }}>
+            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3fb950', boxShadow: '0 0 8px rgba(63,185,80,0.5)' }} />
+            <h2 style={{ fontSize: '14px', fontWeight: '600', color: '#e6edf3' }}>Live Responder Map</h2>
+            <span style={{ marginLeft: 'auto', fontSize: '11px', color: '#8b949e' }}>
+              {responders.length} online
+            </span>
           </div>
 
-          {lastAlert ? (
-            <div className="alert-card-enter" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {/* Status banner */}
-              {(() => {
-                const asc = ALERT_STATUS_CONFIG[lastAlert.status] || ALERT_STATUS_CONFIG.SENT;
-                return (
-                  <div style={{
-                    padding: '12px 14px',
-                    borderRadius: '8px',
-                    background: asc.bg,
-                    border: `1px solid ${asc.border}`,
-                    color: asc.color,
-                    fontSize: '13px',
-                    fontWeight: '600',
-                  }}>
-                    {lastAlert.status === 'IN_PROGRESS' && '🚨 Responder In-Route'}
-                    {lastAlert.status === 'BUSY'        && '⚠️ Rejected — Responder Busy'}
-                    {lastAlert.status === 'OFF_DUTY'    && '⚫ Rejected — Off Duty'}
-                    {lastAlert.status === 'SENT'        && '✅ Transmission Successful'}
-                    {lastAlert.status === 'COMPLETED'   && '✔ Incident Resolved'}
-                  </div>
-                );
-              })()}
+          {/* Map container */}
+          <div style={{ flex: 1, minHeight: '320px', position: 'relative' }}>
+            <MapContainer
+              center={defaultCenter}
+              zoom={11}
+              style={{ width: '100%', height: '100%', minHeight: '320px' }}
+              zoomControl={false}
+            >
+              <TileLayer
+                attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+              />
 
-              {/* Detail rows */}
-              {[
-                { label: 'Type',     value: `${INCIDENT_META[lastAlert.type]?.icon || ''} ${lastAlert.type}` },
-                { label: 'Priority', value: `P${lastAlert.priority} — ${PRIORITY_CONFIG[lastAlert.priority]?.label}`, color: PRIORITY_CONFIG[lastAlert.priority]?.color },
-                { label: 'Time',     value: lastAlert.time },
-              ].map(row => (
-                <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ color: '#656d76', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                    {row.label}
-                  </span>
-                  <span style={{ color: row.color || '#e6edf3', fontSize: '13px', fontWeight: '500' }}>
-                    {row.value}
-                  </span>
-                </div>
+              <RecenterMap incidentCoords={incidentCoords} responders={responders} />
+
+              {/* Incident marker */}
+              {incidentCoords && (
+                <Marker position={[incidentCoords.lat, incidentCoords.lng]} icon={incidentIcon}>
+                  <Popup>
+                    <span style={{ fontWeight: 600 }}>Incident Location</span>
+                    {lastAlert && <><br />{lastAlert.type} · P{lastAlert.priority}</>}
+                  </Popup>
+                </Marker>
+              )}
+
+              {/* Responder markers */}
+              {responders.map((r) => (
+                <Marker
+                  key={r.id}
+                  position={[r.lat, r.lng]}
+                  icon={makeResponderIcon(r.id === nearestResponderId)}
+                >
+                  <Popup>
+                    <span style={{ fontWeight: 600 }}>{r.displayName || 'Responder'}</span>
+                    <br />
+                    <span style={{ color: r.id === nearestResponderId ? '#3fb950' : '#888' }}>
+                      {r.id === nearestResponderId ? '⭐ Nearest' : r.status || 'idle'}
+                    </span>
+                  </Popup>
+                </Marker>
               ))}
+            </MapContainer>
+          </div>
 
-              {/* UART code */}
-              <div>
-                <SectionLabel>UART Signal</SectionLabel>
-                <code style={{
-                  display: 'block',
-                  padding: '10px 14px',
-                  background: '#0d1117',
-                  border: '1px solid #30363d',
-                  borderRadius: '8px',
-                  color: '#79c0ff',
-                  fontFamily: 'ui-monospace, Consolas, monospace',
-                  fontSize: '13px',
-                  letterSpacing: '0.12em',
-                }}>
-                  {lastAlert.binary_code}
-                </code>
-              </div>
-            </div>
-          ) : (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minHeight: '180px',
-              gap: '10px',
-              color: '#484f58',
-            }}>
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <circle cx="12" cy="12" r="9"/>
-                <path d="M12 8v4l3 3"/>
-              </svg>
-              <p style={{ fontSize: '13px', color: '#656d76' }}>Awaiting incoming incident…</p>
-            </div>
-          )}
+          {/* Footer: nearest responder */}
+          <div style={{
+            padding: '10px 20px', borderTop: '1px solid #21262d',
+            background: '#161b22', flexShrink: 0,
+            display: 'flex', alignItems: 'center', gap: '8px',
+          }}>
+            {nearestResponder ? (
+              <>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3fb950', flexShrink: 0, boxShadow: '0 0 6px rgba(63,185,80,0.6)' }} />
+                <span style={{ fontSize: '12px', color: '#8b949e' }}>Nearest:</span>
+                <span style={{ fontSize: '12px', fontWeight: '600', color: '#3fb950' }}>
+                  {nearestResponder.displayName || nearestResponder.id}
+                </span>
+              </>
+            ) : (
+              <span style={{ fontSize: '12px', color: '#484f58' }}>
+                {responders.length === 0 ? 'No responders online' : 'Create an alert to find nearest responder'}
+              </span>
+            )}
+          </div>
         </Card>
       </div>
 
       {/* ── Dispatch History ── */}
       <Card>
         <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          padding: '16px 24px',
-          borderBottom: '1px solid #21262d',
+          display: 'flex', alignItems: 'center', gap: '10px',
+          padding: '16px 24px', borderBottom: '1px solid #21262d',
         }}>
           <h2 style={{ fontSize: '14px', fontWeight: '600', color: '#e6edf3' }}>Dispatch History</h2>
           {history.length > 0 && (
             <span style={{
-              fontSize: '11px',
-              fontWeight: '700',
-              padding: '2px 8px',
-              borderRadius: '10px',
-              background: '#21262d',
-              color: '#8b949e',
-              letterSpacing: '0.03em',
+              fontSize: '11px', fontWeight: '700', padding: '2px 8px',
+              borderRadius: '10px', background: '#21262d', color: '#8b949e', letterSpacing: '0.03em',
             }}>
               {history.length}
             </span>
@@ -554,17 +661,11 @@ const Dashboard = () => {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
-              {['Timestamp', 'Incident', 'Priority', 'Status'].map(col => (
+              {['Timestamp', 'Incident', 'Location', 'Priority', 'Status'].map(col => (
                 <th key={col} style={{
-                  padding: '10px 24px',
-                  textAlign: 'left',
-                  fontSize: '11px',
-                  fontWeight: '600',
-                  color: '#8b949e',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.07em',
-                  background: '#161b22',
-                  borderBottom: '1px solid #21262d',
+                  padding: '10px 24px', textAlign: 'left', fontSize: '11px',
+                  fontWeight: '600', color: '#8b949e', textTransform: 'uppercase',
+                  letterSpacing: '0.07em', background: '#161b22', borderBottom: '1px solid #21262d',
                 }}>
                   {col}
                 </th>
@@ -574,7 +675,7 @@ const Dashboard = () => {
           <tbody>
             {history.length === 0 ? (
               <tr>
-                <td colSpan={4} style={{ padding: '40px', textAlign: 'center', color: '#484f58', fontSize: '13px' }}>
+                <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: '#484f58', fontSize: '13px' }}>
                   No dispatches recorded yet
                 </td>
               </tr>
@@ -594,21 +695,19 @@ const Dashboard = () => {
                       {item.type}
                     </span>
                   </td>
+                  <td style={{ padding: '14px 24px', fontSize: '13px', color: '#8b949e', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {item.location || '—'}
+                  </td>
                   <td style={{ padding: '14px 24px' }}>
                     {(() => {
                       const cfg = PRIORITY_CONFIG[item.priority];
                       return cfg ? (
                         <span style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          padding: '2px 9px',
-                          borderRadius: '10px',
-                          fontSize: '11px',
-                          fontWeight: '700',
-                          color: cfg.color,
-                          background: cfg.bg,
-                          border: `1px solid ${cfg.border}`,
-                          letterSpacing: '0.04em',
+                          display: 'inline-flex', alignItems: 'center',
+                          padding: '2px 9px', borderRadius: '10px',
+                          fontSize: '11px', fontWeight: '700',
+                          color: cfg.color, background: cfg.bg,
+                          border: `1px solid ${cfg.border}`, letterSpacing: '0.04em',
                         }}>
                           P{item.priority}
                         </span>
