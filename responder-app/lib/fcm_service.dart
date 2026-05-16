@@ -1,10 +1,11 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 // Background message handler — must be top-level function
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  print('Background FCM message received: ${message.messageId}');
+  // no-op: background messages are handled silently
 }
 
 class FcmService {
@@ -19,35 +20,34 @@ class FcmService {
     );
 
     if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-      print('FCM permission granted');
-
-      // Get device token
+      // Get device token and store it under this user's UID
       String? token = await _messaging.getToken();
       if (token != null) {
         await _saveTokenToFirestore(token);
-        print('FCM token saved: $token');
       }
 
-      // Listen for token refresh
+      // Re-save on token rotation so it stays current
       _messaging.onTokenRefresh.listen((newToken) {
         _saveTokenToFirestore(newToken);
       });
 
-      // Handle foreground messages
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        print('Foreground FCM message: ${message.notification?.title}');
-      });
+      // Foreground messages are delivered as FCM data payloads;
+      // the app's alert list updates via the Firestore StreamBuilder.
+      FirebaseMessaging.onMessage.listen((_) {});
     }
   }
 
+  /// Stores the FCM device token under fcm_tokens/{uid} so the backend
+  /// can look it up by the responder's Firebase Auth UID when dispatching.
   static Future<void> _saveTokenToFirestore(String token) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return; // not logged in yet — skip
     await FirebaseFirestore.instance
         .collection('fcm_tokens')
-        .doc('responder_token')
+        .doc(uid)
         .set({
       'token': token,
       'updatedAt': Timestamp.now(),
     });
   }
-  
 }

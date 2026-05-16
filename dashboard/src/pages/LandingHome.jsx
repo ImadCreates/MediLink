@@ -184,7 +184,7 @@ const LandingHome = () => {
             fontSize: 11, fontWeight: 600, letterSpacing: '0.22em',
             textTransform: 'uppercase',
           }}>
-            Emergency Dispatch
+            Dispatch Intelligence
           </p>
 
           <h1 ref={headlineRef} style={{
@@ -199,7 +199,7 @@ const LandingHome = () => {
             marginTop: 16, fontSize: 16, color: 'rgba(255,255,255,0.5)',
             maxWidth: 420, lineHeight: 1.6,
           }}>
-            Real-time emergency coordination for dispatchers and field responders.
+            Real-time coordination for any team that needs the right person at the right place.
           </p>
 
           {/* CTA buttons */}
@@ -242,7 +242,7 @@ const LandingHome = () => {
             width: '50%', height: '100vh',
             background: 'transparent',
             position: 'relative',
-            overflow: 'hidden',
+            overflow: 'visible',
           }}
         >
           <CylinderCarousel key={location.key} />

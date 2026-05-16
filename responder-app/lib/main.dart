@@ -6,6 +6,7 @@ import 'firebase_options.dart';
 import 'login_screen.dart';
 import 'alerts_screen.dart';
 import 'fcm_service.dart';
+import 'services/location_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,6 +41,7 @@ class MyApp extends StatelessWidget {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasData) {
+            LocationService.startTracking(); // no-op if already running
             return AlertsScreen();
           }
           return const LoginScreen();

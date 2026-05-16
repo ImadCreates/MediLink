@@ -21,7 +21,7 @@
   50%       { opacity: 1; }
 }
 @keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(24px); }
+  from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 @keyframes scrollBounce {
@@ -50,6 +50,7 @@ body {
   width: 100%;
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
 }
 
 h1, h2, h3, h4, h5, h6 {

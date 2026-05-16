@@ -14,20 +14,24 @@ import java.util.concurrent.ExecutionException;
 @Service
 public class FcmNotificationService {
 
-    public void sendAlertNotification(String incidentType, String location) {
+    /**
+     * Send an FCM push notification to the specific responder identified by {@code assignedTo}.
+     * Looks up their device token from the {@code fcm_tokens/{assignedTo}} Firestore document.
+     */
+    public void sendAlertNotification(String incidentType, String location, String assignedTo) {
         try {
-            // Get the FCM token from Firestore
+            // Look up the FCM token for the assigned responder specifically
             com.google.cloud.firestore.Firestore db =
                 com.google.firebase.cloud.FirestoreClient.getFirestore();
 
             com.google.cloud.firestore.DocumentSnapshot tokenDoc =
                 db.collection("fcm_tokens")
-                  .document("responder_token")
+                  .document(assignedTo)
                   .get()
                   .get();
 
             if (!tokenDoc.exists()) {
-                System.out.println("No FCM token found — responder app not registered");
+                System.err.println("No FCM token found for responder: " + assignedTo);
                 return;
             }
 

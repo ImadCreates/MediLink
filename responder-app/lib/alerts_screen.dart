@@ -6,6 +6,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
+import 'services/location_service.dart';
 
 class AlertsScreen extends StatefulWidget {
   const AlertsScreen({super.key});
@@ -15,14 +16,23 @@ class AlertsScreen extends StatefulWidget {
 }
 
 class _AlertsScreenState extends State<AlertsScreen> {
-  String _responderStatus = 'idle';
+  String _currentStatus = 'idle';
+
+  @override
+  void initState() {
+    super.initState();
+    LocationService.startTracking();
+  }
+
+  @override
+  void dispose() {
+    LocationService.stopTracking();
+    super.dispose();
+  }
 
   Future<void> _setResponderStatus(String status) async {
-    await FirebaseFirestore.instance
-        .collection('responder_status')
-        .doc('current')
-        .set({'status': status, 'updatedAt': Timestamp.now()});
-    setState(() => _responderStatus = status);
+    setState(() => _currentStatus = status); // update UI immediately
+    await LocationService.updateStatus(status);
   }
 
   Future<LatLng?> _geocode(String location) async {
@@ -82,7 +92,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
 
   Widget _statusOption(
       String value, String label, Color color, String subtitle) {
-    final selected = _responderStatus == value;
+    final selected = _currentStatus == value;
     return GestureDetector(
       onTap: () {
         _setResponderStatus(value);
@@ -132,14 +142,14 @@ class _AlertsScreenState extends State<AlertsScreen> {
   }
 
   Color _statusColor() {
-    if (_responderStatus == 'idle') return const Color(0xFF00c853);
-    if (_responderStatus == 'busy') return const Color(0xFFf59e0b);
+    if (_currentStatus == 'idle') return const Color(0xFF00c853);
+    if (_currentStatus == 'busy') return const Color(0xFFf59e0b);
     return const Color(0xFF64748b);
   }
 
   String _statusLabel() {
-    if (_responderStatus == 'idle') return 'Idle';
-    if (_responderStatus == 'busy') return 'Busy';
+    if (_currentStatus == 'idle') return 'Idle';
+    if (_currentStatus == 'busy') return 'Busy';
     return 'Off Duty';
   }
 
@@ -297,9 +307,23 @@ class _AlertsScreenState extends State<AlertsScreen> {
             // Alerts list
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
+                // ── IMPORTANT: Composite index required ──────────────────
+                // This query filters on two fields (assignedTo + status),
+                // which Firestore requires a composite index for.
+                // If missing, the query throws a runtime exception with a
+                // link in the Flutter logs to create it automatically.
+                //
+                // Create manually at:
+                // https://console.firebase.google.com/project/medilink-responder/firestore/indexes
+                //
+                // Collection: alerts
+                // Fields:     assignedTo  Ascending
+                //             status      Ascending
+                // ──────────────────────────────────────────────────────────
                 stream: FirebaseFirestore.instance
                     .collection('alerts')
-                    .where('status', whereIn: ['pending', 'accepted'])
+                    .where('assignedTo', isEqualTo: FirebaseAuth.instance.currentUser!.uid)
+                    .where('status', whereIn: ['sent', 'accepted'])
                     .snapshots(),
                 builder: (context, snapshot) {
                   if (snapshot.connectionState ==
@@ -372,6 +396,13 @@ class _AlertsScreenState extends State<AlertsScreen> {
         .collection('alerts')
         .doc(docId)
         .update({'status': status});
+
+    // Mirror alert acceptance/resolution to the responders collection
+    if (status == 'accepted') {
+      await LocationService.updateStatus('busy');
+    } else if (status == 'resolved' || status == 'declined') {
+      await LocationService.updateStatus('idle');
+    }
   }
 }
 

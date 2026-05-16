@@ -113,7 +113,7 @@ const Login = () => {
       {/* Card */}
       <div style={{
         position: 'relative', zIndex: 10,
-        width: '100%', maxWidth: 400, margin: '0 24px',
+        width: '100%', maxWidth: 400, margin: '0 auto',
         background: 'rgba(255,255,255,0.07)',
         border: '1px solid rgba(255,255,255,0.15)',
         borderRadius: 24, padding: '48px 36px',
@@ -152,7 +152,7 @@ const Login = () => {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="dispatcher@hospital.com"
+              placeholder="dispatcher@company.com"
               required
               style={fieldStyle}
             />

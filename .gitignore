@@ -1,7 +1,16 @@
 # Node
 dashboard/node_modules/
+
 # Spring Boot
 backend/target/
+
 # VS Code
 .vscode/
+
 # Quartus compiled output already handled in fpga/.gitignore
+
+# Keep screenshots and binary files out of backend resources
+backend/src/main/resources/*.jpg
+backend/src/main/resources/*.jpeg
+backend/src/main/resources/*.png
+backend/src/main/resources/*.pdf

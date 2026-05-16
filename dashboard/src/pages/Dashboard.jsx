@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './dashboard.css';
-import { collection, onSnapshot, query, doc } from 'firebase/firestore';
+import { collection, onSnapshot, query, addDoc, serverTimestamp, orderBy, limit } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { getAuth, signOut } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
@@ -177,6 +177,11 @@ const Dashboard = () => {
   const [incidentCoords, setIncidentCoords]   = useState(null);
   const [nearestResponderId, setNearestResponderId] = useState(null);
 
+  // ── Dispatch modal state ────────────────────────────────────────────────────
+  const [showDispatchModal, setShowDispatchModal]     = useState(false);
+  const [pendingAlert, setPendingAlert]               = useState(null);
+  const [selectedResponderId, setSelectedResponderId] = useState(null);
+
   // ── Logout ──────────────────────────────────────────────────────────────────
   const handleLogout = async () => {
     try {
@@ -245,6 +250,29 @@ const Dashboard = () => {
    * }, []);
    */
 
+  // ── Firestore: persistent dispatch history ─────────────────────────────────
+  useEffect(() => {
+    const q = query(
+      collection(db, 'alerts'),
+      orderBy('createdAt', 'desc'),
+      limit(20)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const loaded = snapshot.docs.map(d => ({
+        type:     d.data().type || d.data().incidentType,
+        priority: String(d.data().priority),
+        location: d.data().location,
+        time:     d.data().createdAt?.toDate().toLocaleTimeString() || 'N/A',
+        status:   d.data().status === 'resolved' ? 'COMPLETED'
+                : d.data().status === 'accepted'  ? 'IN_PROGRESS'
+                : d.data().status === 'declined'  ? 'BUSY'
+                : 'SENT',
+      }));
+      setHistory(loaded);
+    });
+    return () => unsubscribe();
+  }, []);
+
   // ── Firestore: alert status changes ────────────────────────────────────────
   useEffect(() => {
     const q = query(collection(db, 'alerts'));
@@ -276,28 +304,13 @@ const Dashboard = () => {
     return () => unsubscribe();
   }, []);
 
-  // ── Firestore: responder self-reported status ───────────────────────────────
-  useEffect(() => {
-    const unsubscribe = onSnapshot(
-      doc(db, 'responder_status', 'current'),
-      (docSnapshot) => {
-        if (docSnapshot.exists()) {
-          const status = docSnapshot.data().status;
-          if (status === 'idle')     setCurrentStatus('IDLE');
-          if (status === 'busy')     setCurrentStatus('BUSY');
-          if (status === 'off_duty') setCurrentStatus('OFF_DUTY');
-        }
-      }
-    );
-    return () => unsubscribe();
-  }, []);
-
   // ── Firestore: live responder locations ────────────────────────────────────
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'responders'), (snapshot) => {
       const list = snapshot.docs
         .map((d) => ({ id: d.id, ...d.data() }))
-        .filter((r) => r.lat != null && r.lng != null);
+        .filter((r) => r.lat != null && r.lng != null)
+        .filter((r) => r.status === 'idle');
       setResponders(list);
     });
     return () => unsubscribe();
@@ -317,34 +330,79 @@ const Dashboard = () => {
     setNearestResponderId(nearest);
   }, [incidentCoords, responders]);
 
-  // ── Create alert ────────────────────────────────────────────────────────────
+  // ── Step 1: geocode + rank responders → open modal ─────────────────────────
   const handleCreateAlert = async (e) => {
     e.preventDefault();
     if (currentStatus === 'BUSY' || currentStatus === 'OFF_DUTY') {
       alert(`Cannot send alert — responder is currently ${currentStatus.replace('_', ' ')}.`);
       return;
     }
+
+    const resolvedType = useCustomType && customType.trim() ? customType.trim() : incidentType;
+
+    // Geocode the incident location
+    const coords = await geocode(locationInput);
+    if (coords) setIncidentCoords(coords);
+
+    // Rank all available responders by distance to incident
+    const ranked = responders
+      .map(r => ({
+        ...r,
+        dist: coords ? haversine(coords.lat, coords.lng, r.lat, r.lng) : Infinity,
+      }))
+      .sort((a, b) => a.dist - b.dist);
+
+    // Store pending alert details and open modal
+    setPendingAlert({
+      type:     resolvedType,
+      priority,
+      location: locationInput || 'Location not specified',
+      coords,
+      ranked,
+    });
+    setSelectedResponderId(ranked[0]?.id ?? null);
+    setShowDispatchModal(true);
+  };
+
+  // ── Step 2: confirmed dispatch → axios + Firestore write ───────────────────
+  const handleConfirmDispatch = async () => {
+    if (!pendingAlert || !selectedResponderId) return;
     try {
-      const resolvedType = useCustomType && customType.trim() ? customType.trim() : incidentType;
       const { data } = await axios.post(
         'https://medilink-production-f576.up.railway.app/api/alerts/create',
-        { incidentType: resolvedType, priority: parseInt(priority), location: locationInput || 'Location not specified' }
+        {
+          incidentType: pendingAlert.type,
+          priority:     parseInt(pendingAlert.priority),
+          location:     pendingAlert.location,
+          assignedTo:   selectedResponderId,
+        }
       );
 
-      // Geocode and update map
-      const coords = await geocode(locationInput);
-      if (coords) setIncidentCoords(coords);
+      await addDoc(collection(db, 'alerts'), {
+        type:         pendingAlert.type,
+        incidentType: pendingAlert.type,
+        priority:     parseInt(pendingAlert.priority),
+        location:     pendingAlert.location,
+        status:       'sent',
+        assignedTo:   selectedResponderId,
+        createdAt:    serverTimestamp(),
+      });
 
       const newAlert = {
         type:        data.incident,
-        priority,
+        priority:    pendingAlert.priority,
         binary_code: data.systemCode,
         time:        new Date().toLocaleTimeString(),
-        location:    locationInput || '—',
+        location:    pendingAlert.location,
         status:      'SENT',
       };
       setLastAlert(newAlert);
       setHistory(prev => [newAlert, ...prev]);
+
+      // Close modal and reset
+      setShowDispatchModal(false);
+      setPendingAlert(null);
+      setSelectedResponderId(null);
       setLocationInput('');
       if (useCustomType) setCustomType('');
     } catch (err) {
@@ -554,7 +612,7 @@ const Dashboard = () => {
             >
               {blocked
                 ? `Blocked — Responder ${currentStatus.replace('_', ' ')}`
-                : 'Send Emergency Alert'
+                : 'Review & Dispatch →'
               }
             </button>
           </form>
@@ -570,7 +628,7 @@ const Dashboard = () => {
             <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3fb950', boxShadow: '0 0 8px rgba(63,185,80,0.5)' }} />
             <h2 style={{ fontSize: '14px', fontWeight: '600', color: '#e6edf3' }}>Live Responder Map</h2>
             <span style={{ marginLeft: 'auto', fontSize: '11px', color: '#8b949e' }}>
-              {responders.length} online
+              {responders.length} available
             </span>
           </div>
 
@@ -634,12 +692,154 @@ const Dashboard = () => {
               </>
             ) : (
               <span style={{ fontSize: '12px', color: '#484f58' }}>
-                {responders.length === 0 ? 'No responders online' : 'Create an alert to find nearest responder'}
+                {responders.length === 0 ? 'No responders available' : 'Create an alert to find nearest responder'}
               </span>
             )}
           </div>
         </Card>
       </div>
+
+      {/* ── Dispatch Modal ── */}
+      {showDispatchModal && pendingAlert && (
+        <div style={{
+          position: 'fixed', inset: 0,
+          background: 'rgba(0,0,0,0.75)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <div style={{
+            background: '#161b22',
+            border: '1px solid #30363d',
+            borderRadius: '16px',
+            width: '100%', maxWidth: '520px',
+            padding: '28px',
+            maxHeight: '80vh',
+            overflowY: 'auto',
+          }}>
+            {/* Modal header */}
+            <div style={{ marginBottom: '20px' }}>
+              <h2 style={{ fontSize: '16px', fontWeight: '700', color: '#e6edf3', marginBottom: '4px' }}>
+                Confirm Dispatch
+              </h2>
+              <p style={{ fontSize: '13px', color: '#8b949e' }}>
+                Select a responder to assign this alert to, then confirm.
+              </p>
+            </div>
+
+            {/* Alert summary */}
+            <div style={{
+              background: '#0d1117',
+              border: '1px solid #30363d',
+              borderRadius: '10px',
+              padding: '14px 16px',
+              marginBottom: '20px',
+              display: 'flex', flexDirection: 'column', gap: '6px',
+            }}>
+              <div style={{ fontSize: '13px', color: '#e6edf3', fontWeight: '600' }}>
+                {INCIDENT_META[pendingAlert.type]?.icon || '🚨'} {pendingAlert.type}
+              </div>
+              <div style={{ fontSize: '12px', color: '#8b949e' }}>
+                📍 {pendingAlert.location} &nbsp;·&nbsp; P{pendingAlert.priority}
+              </div>
+            </div>
+
+            {/* Responder list */}
+            <div style={{ marginBottom: '20px' }}>
+              <SectionLabel>Available Responders — sorted by distance</SectionLabel>
+              {pendingAlert.ranked.length === 0 ? (
+                <div style={{ fontSize: '13px', color: '#484f58', padding: '16px 0' }}>
+                  No responders currently available.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {pendingAlert.ranked.map((r, i) => {
+                    const isSelected = selectedResponderId === r.id;
+                    const isNearest  = i === 0;
+                    return (
+                      <div
+                        key={r.id}
+                        onClick={() => setSelectedResponderId(r.id)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '12px',
+                          padding: '12px 14px', borderRadius: '10px',
+                          border: `1px solid ${isSelected ? '#3fb950' : '#30363d'}`,
+                          background: isSelected ? 'rgba(63,185,80,0.08)' : '#0d1117',
+                          cursor: 'pointer',
+                          transition: 'border-color 0.15s, background 0.15s',
+                        }}
+                      >
+                        {/* Status dot */}
+                        <span style={{
+                          width: '10px', height: '10px', borderRadius: '50%', flexShrink: 0,
+                          background: isNearest ? '#3fb950' : '#58a6ff',
+                          boxShadow: `0 0 6px ${isNearest ? 'rgba(63,185,80,0.6)' : 'rgba(88,166,255,0.4)'}`,
+                        }} />
+
+                        {/* Name */}
+                        <span style={{ flex: 1, fontSize: '13px', fontWeight: '500', color: '#e6edf3' }}>
+                          {r.displayName || r.id}
+                        </span>
+
+                        {/* NEAREST badge */}
+                        {isNearest && (
+                          <span style={{
+                            fontSize: '10px', fontWeight: '700', padding: '2px 8px',
+                            borderRadius: '8px',
+                            background: 'rgba(63,185,80,0.15)', color: '#3fb950',
+                            border: '1px solid rgba(63,185,80,0.3)',
+                            letterSpacing: '0.05em', flexShrink: 0,
+                          }}>
+                            NEAREST
+                          </span>
+                        )}
+
+                        {/* Distance */}
+                        <span style={{ fontSize: '12px', color: '#8b949e', flexShrink: 0 }}>
+                          {r.dist === Infinity ? '—' : `${r.dist.toFixed(1)} km`}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Action buttons */}
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={() => {
+                  setShowDispatchModal(false);
+                  setPendingAlert(null);
+                  setSelectedResponderId(null);
+                }}
+                style={{
+                  flex: 1, padding: '12px', borderRadius: '8px',
+                  border: '1px solid #30363d', background: 'transparent',
+                  color: '#8b949e', fontSize: '13px', fontWeight: '600',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDispatch}
+                disabled={!selectedResponderId}
+                style={{
+                  flex: 1, padding: '12px', borderRadius: '8px', border: 'none',
+                  background: selectedResponderId ? '#f85149' : '#21262d',
+                  color: selectedResponderId ? '#ffffff' : '#656d76',
+                  fontSize: '13px', fontWeight: '700',
+                  cursor: selectedResponderId ? 'pointer' : 'not-allowed',
+                  letterSpacing: '0.05em', textTransform: 'uppercase',
+                  fontFamily: 'inherit',
+                }}
+              >
+                Send Alert
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Dispatch History ── */}
       <Card>
