@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './dashboard.css';
-import { collection, onSnapshot, query, addDoc, serverTimestamp, orderBy, limit } from 'firebase/firestore';
+import { collection, onSnapshot, query, addDoc, serverTimestamp, orderBy, limit, getDocs, deleteDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { getAuth, signOut } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
@@ -409,6 +409,15 @@ const Dashboard = () => {
       console.error('Alert creation failed:', err);
       alert('Backend connection failed!');
     }
+  };
+
+  // ── Clear all dispatch history ─────────────────────────────────────────────
+  const handleClearHistory = async () => {
+    if (!window.confirm('Clear all dispatch history? This cannot be undone.')) return;
+    const snapshot = await getDocs(collection(db, 'alerts'));
+    await Promise.all(snapshot.docs.map(d => deleteDoc(d.ref)));
+    setHistory([]);
+    setLastAlert(null);
   };
 
   const sc      = STATUS_CONFIG[currentStatus] || STATUS_CONFIG.IDLE;
@@ -856,6 +865,25 @@ const Dashboard = () => {
               {history.length}
             </span>
           )}
+          <button
+            onClick={handleClearHistory}
+            className="clear-history-btn"
+            style={{
+              marginLeft: 'auto',
+              background: 'transparent',
+              border: '1px solid rgba(248,81,73,0.4)',
+              color: '#f85149',
+              fontSize: '11px',
+              fontWeight: '600',
+              padding: '4px 12px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              letterSpacing: '0.04em',
+              fontFamily: 'inherit',
+            }}
+          >
+            CLEAR HISTORY
+          </button>
         </div>
 
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>

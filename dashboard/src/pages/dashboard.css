@@ -71,3 +71,11 @@
 .card:hover {
   border-color: #484f58;
 }
+
+.clear-history-btn {
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.clear-history-btn:hover {
+  border-color: rgba(248,81,73,0.8) !important;
+  color: #ff6b6b !important;
+}

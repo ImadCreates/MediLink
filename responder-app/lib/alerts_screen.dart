@@ -520,7 +520,7 @@ class _AlertCardState extends State<_AlertCard> {
                           if (status == 'accepted')
                             _badge('✓ Accepted',
                                 const Color(0xFF3b82f6)),
-                          if (status == 'pending')
+                          if (status == 'sent')
                             Container(
                               width: 8, height: 8,
                               decoration: const BoxDecoration(
@@ -549,7 +549,7 @@ class _AlertCardState extends State<_AlertCard> {
                         const SizedBox(height: 16),
 
                         // Buttons
-                        if (status == 'pending')
+                        if (status == 'sent')
                           Row(children: [
                             Expanded(
                               child: _gradientButton(
